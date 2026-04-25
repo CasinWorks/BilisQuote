@@ -1,6 +1,7 @@
 import { useState, type ChangeEventHandler } from 'react'
 import { buildBackupPayload, downloadBackupJson, parseBackupPayload } from '../lib/backup'
 import { downloadCsv, invoicesToCsv, quotesToCsv } from '../lib/csv'
+import { fullBackupToCsv, parseFullBackupCsv } from '../lib/fullBackupCsv'
 import { useAppStore } from '../store/useAppStore'
 
 export function Settings() {
@@ -26,6 +27,24 @@ export function Settings() {
     })
     downloadBackupJson(payload)
     setMigrationMsg('Full backup downloaded (.json). Use Import on another browser to restore.')
+  }
+
+  const exportFullBackupCsv = () => {
+    setMigrationErr(null)
+    const s = useAppStore.getState()
+    const payload = buildBackupPayload({
+      profile: s.profile,
+      settings: s.settings,
+      clients: s.clients,
+      quotes: s.quotes,
+      invoices: s.invoices,
+      bankAccounts: s.bankAccounts,
+    })
+    downloadCsv(
+      `quotation-app-backup-${new Date().toISOString().slice(0, 10)}.csv`,
+      fullBackupToCsv(payload),
+    )
+    setMigrationMsg('Full backup downloaded (.csv). Use Import on another browser to restore.')
   }
 
   const exportQuotesCsv = () => {
@@ -57,7 +76,13 @@ export function Settings() {
     reader.onload = () => {
       try {
         const text = String(reader.result ?? '')
-        const raw: unknown = JSON.parse(text)
+        const isCsv = file.name.toLowerCase().endsWith('.csv')
+        const raw: unknown = isCsv ? (() => {
+          const p = parseFullBackupCsv(text)
+          if (!p.ok) throw new Error(p.error)
+          return p.payload
+        })() : JSON.parse(text)
+
         const parsed = parseBackupPayload(raw)
         if (!parsed.ok) {
           setMigrationErr(parsed.error)
@@ -70,7 +95,7 @@ export function Settings() {
         importFullState(parsed.data)
         setMigrationMsg('Backup restored. Refresh if anything looks out of date.')
       } catch {
-        setMigrationErr('Could not read this file. Use a .json backup exported from this app.')
+        setMigrationErr('Could not read this file. Use a .json or full-backup .csv exported from this app.')
       } finally {
         e.target.value = ''
       }
@@ -255,9 +280,9 @@ export function Settings() {
       <section className="rounded-xl border border-ink-200 bg-white p-4 sm:p-6 shadow-sm space-y-4">
         <h3 className="font-display text-lg font-semibold text-ink-950">Backup & migration</h3>
         <p className="text-sm text-ink-600">
-          Move your data to another browser or machine: download a <strong>full backup (.json)</strong>, then
-          import it where you need it. CSV files are only for spreadsheets — they do{' '}
-          <strong>not</strong> contain enough detail to restore the app.
+          Move your data to another browser or machine: download a <strong>full backup</strong>, then import
+          it where you need it. You can use <strong>.json</strong> or a <strong>full-backup .csv</strong>.
+          (The full-backup CSV preserves nested data by storing the backup payload inside one CSV field.)
         </p>
         <div className="flex flex-wrap gap-2">
           <button
@@ -266,6 +291,13 @@ export function Settings() {
             className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white shadow hover:bg-blue-700"
           >
             Download full backup (.json)
+          </button>
+          <button
+            type="button"
+            onClick={exportFullBackupCsv}
+            className="rounded-lg border border-ink-200 bg-white px-4 py-2 text-sm font-medium text-ink-800 hover:bg-ink-50"
+          >
+            Download full backup (.csv)
           </button>
           <button
             type="button"
@@ -285,12 +317,12 @@ export function Settings() {
         <div className="rounded-lg border border-dashed border-ink-300 bg-ink-50/50 px-4 py-3">
           <p className="text-sm font-medium text-ink-800">Import backup into this browser</p>
           <p className="text-xs text-ink-500 mt-1 mb-2">
-            Choose a <code className="text-[11px] bg-white px-1 rounded">.json</code> file you exported
-            here before.
+            Choose a <code className="text-[11px] bg-white px-1 rounded">.json</code> or full-backup{' '}
+            <code className="text-[11px] bg-white px-1 rounded">.csv</code> you exported here before.
           </p>
           <input
             type="file"
-            accept=".json,application/json"
+            accept=".json,.csv,application/json,text/csv"
             className="text-sm text-ink-700 file:mr-3 file:rounded-md file:border-0 file:bg-accent file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-white"
             onChange={onImportFile}
           />
