@@ -3,7 +3,7 @@ import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/useAuth'
 
 export function Login() {
-  const { username, login } = useAuth()
+  const { user, login, loginWithGoogle } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
   const rawFrom = (location.state as { from?: string } | null)?.from
@@ -15,18 +15,22 @@ export function Login() {
   const [u, setU] = useState('')
   const [p, setP] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
 
-  if (username) {
+  if (user) {
     return <Navigate to={from} replace />
   }
 
-  const submit = (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
-    if (login(u, p)) {
-      navigate(from, { replace: true })
-    } else {
-      setError('Invalid username or password.')
+    setBusy(true)
+    try {
+      const res = await login(u, p)
+      if (res.ok) navigate(from, { replace: true })
+      else setError(res.error || 'Login failed.')
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -36,17 +40,15 @@ export function Login() {
         <p className="text-xs font-semibold uppercase tracking-wide text-accent">Sign in</p>
         <h1 className="mt-2 font-display text-2xl font-semibold text-ink-950">Welcome back</h1>
         <p className="mt-2 text-sm text-ink-600">
-          This build uses a single demo account. Set{' '}
-          <code className="text-xs bg-ink-100 px-1 py-0.5 rounded">VITE_AUTH_USERNAME</code> /{' '}
-          <code className="text-xs bg-ink-100 px-1 py-0.5 rounded">VITE_AUTH_PASSWORD</code> on
-          Vercel to change it.
+          Sign in with your Supabase account (email/password) or continue with Google (if enabled).
         </p>
 
         <form onSubmit={submit} className="mt-6 space-y-4">
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-ink-600">Username</span>
+            <span className="text-ink-600">Email</span>
             <input
-              autoComplete="username"
+              type="email"
+              autoComplete="email"
               className="rounded-lg border border-ink-200 px-3 py-2.5 text-sm"
               value={u}
               onChange={(e) => setU(e.target.value)}
@@ -67,11 +69,32 @@ export function Login() {
           {error ? <p className="text-sm text-red-600">{error}</p> : null}
           <button
             type="submit"
-            className="w-full rounded-lg bg-accent py-2.5 text-sm font-medium text-white shadow hover:bg-blue-700"
+            disabled={busy}
+            className="w-full rounded-lg bg-accent py-2.5 text-sm font-medium text-white shadow hover:bg-blue-700 disabled:opacity-50"
           >
-            Log in
+            {busy ? 'Signing in…' : 'Log in'}
           </button>
         </form>
+
+        <div className="mt-3">
+          <button
+            type="button"
+            onClick={async () => {
+              setError(null)
+              setBusy(true)
+              try {
+                const res = await loginWithGoogle()
+                if (!res.ok) setError(res.error || 'Google sign-in failed.')
+              } finally {
+                setBusy(false)
+              }
+            }}
+            disabled={busy}
+            className="w-full rounded-lg border border-ink-200 bg-white py-2.5 text-sm font-medium text-ink-800 hover:bg-ink-50"
+          >
+            Continue with Google
+          </button>
+        </div>
 
         <p className="mt-6 text-center text-sm text-ink-600">
           No account?{' '}
@@ -80,10 +103,6 @@ export function Login() {
           </Link>
         </p>
       </div>
-      <p className="mt-8 max-w-md text-center text-xs text-ink-400">
-        Default credentials: <span className="font-mono">admin</span> /{' '}
-        <span className="font-mono">admin</span> — change via environment variables for public deploys.
-      </p>
     </div>
   )
 }

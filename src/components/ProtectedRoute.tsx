@@ -2,10 +2,10 @@ import { Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../auth/useAuth'
 
 export function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { username } = useAuth()
+  const { user } = useAuth()
   const location = useLocation()
 
-  if (!username) {
+  if (!user) {
     return <Navigate to="/login" replace state={{ from: location.pathname }} />
   }
 

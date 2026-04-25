@@ -3,31 +3,36 @@ import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/useAuth'
 
 export function Register() {
-  const { username, register } = useAuth()
+  const { user, register } = useAuth()
   const navigate = useNavigate()
 
   const [u, setU] = useState('')
   const [p, setP] = useState('')
   const [confirm, setConfirm] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
 
-  if (username) {
+  if (user) {
     return <Navigate to="/" replace />
   }
 
-  const submit = (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
     if (p !== confirm) {
       setError('Passwords do not match.')
       return
     }
-    if (register(u, p)) {
-      navigate('/', { replace: true })
-    } else {
-      setError(
-        'Registration only accepts the configured credentials. Use the same username and password as in Vercel env (or the default admin / admin).',
-      )
+    setBusy(true)
+    try {
+      const res = await register(u, p)
+      if (res.ok) {
+        navigate('/', { replace: true })
+      } else {
+        setError(res.error || 'Registration failed.')
+      }
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -37,16 +42,16 @@ export function Register() {
         <p className="text-xs font-semibold uppercase tracking-wide text-accent">Register</p>
         <h1 className="mt-2 font-display text-2xl font-semibold text-ink-950">Create access</h1>
         <p className="mt-2 text-sm text-ink-600">
-          This is a client-side gate. Only the username/password pair configured for this deployment
-          will work (defaults: <span className="font-mono">admin</span> /{' '}
-          <span className="font-mono">admin</span>).
+          Create a Supabase account (email/password). Depending on your Supabase Auth settings, you may need
+          to confirm your email before you can sign in.
         </p>
 
         <form onSubmit={submit} className="mt-6 space-y-4">
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-ink-600">Username</span>
+            <span className="text-ink-600">Email</span>
             <input
-              autoComplete="username"
+              type="email"
+              autoComplete="email"
               className="rounded-lg border border-ink-200 px-3 py-2.5 text-sm"
               value={u}
               onChange={(e) => setU(e.target.value)}
@@ -78,9 +83,10 @@ export function Register() {
           {error ? <p className="text-sm text-red-600">{error}</p> : null}
           <button
             type="submit"
-            className="w-full rounded-lg bg-accent py-2.5 text-sm font-medium text-white shadow hover:bg-blue-700"
+            disabled={busy}
+            className="w-full rounded-lg bg-accent py-2.5 text-sm font-medium text-white shadow hover:bg-blue-700 disabled:opacity-50"
           >
-            Register & continue
+            {busy ? 'Creating…' : 'Register & continue'}
           </button>
         </form>
 

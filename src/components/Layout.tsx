@@ -10,7 +10,7 @@ const linkClass = ({ isActive }: { isActive: boolean }) =>
   ].join(' ')
 
 export function Layout() {
-  const { username, logout } = useAuth()
+  const { email, logout } = useAuth()
   const navigate = useNavigate()
 
   return (
@@ -24,8 +24,8 @@ export function Layout() {
             <h1 className="font-display text-lg font-semibold text-ink-950">
               Quotations & invoices
             </h1>
-            {username ? (
-              <p className="text-xs text-ink-500 mt-1">Signed in as {username}</p>
+            {email ? (
+              <p className="text-xs text-ink-500 mt-1">Signed in as {email}</p>
             ) : null}
           </div>
           <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
@@ -52,8 +52,7 @@ export function Layout() {
           <button
             type="button"
             onClick={() => {
-              logout()
-              navigate('/login', { replace: true })
+              void logout().finally(() => navigate('/login', { replace: true }))
             }}
             className="text-sm font-medium text-ink-600 hover:text-ink-900 px-3 py-2 rounded-md hover:bg-ink-100 self-start sm:self-center"
           >
