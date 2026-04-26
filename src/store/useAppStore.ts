@@ -17,6 +17,7 @@ import {
   deleteInvoiceRow,
   deleteQuoteRow,
   fetchAppData,
+  replaceAllAppData,
   rpcConsumeNextInvoiceNumber,
   rpcConsumeNextQuoteNumber,
   upsertBankAccountRow,
@@ -91,7 +92,7 @@ type Actions = {
   updateBankAccount: (id: string, b: Partial<BankAccount>) => void
   deleteBankAccount: (id: string) => void
   /** Replace all persisted app data (used after importing a backup file). */
-  importFullState: (data: AppBackupPayload) => void
+  importFullState: (data: AppBackupPayload) => Promise<void>
   resetData: () => void
 }
 
@@ -330,7 +331,7 @@ export const useAppStore = create<State & Actions>()((set, get) => ({
     )
   },
 
-  importFullState: (data) => {
+  importFullState: async (data) => {
     // Keep legacy migrations for older backup payloads.
     const quotes = (data.quotes ?? []).map((q) =>
       migrateQuoteFromLegacy(q as unknown as Record<string, unknown>),
@@ -348,18 +349,19 @@ export const useAppStore = create<State & Actions>()((set, get) => ({
       bankAccounts,
     })
 
-    void (async () => {
-      await upsertProfile(data.profile)
-      await upsertSettings(data.settings)
-      await Promise.all([
-        ...data.clients.map((c) => upsertClient(c)),
-        ...quotes.map((q) => upsertQuote(q)),
-        ...invoices.map((i) => upsertInvoice(i)),
-        ...bankAccounts.map((b) => upsertBankAccountRow(b)),
-      ])
-    })().catch((e) =>
-      set({ syncError: e instanceof Error ? e.message : 'Failed to import data to Supabase.' }),
-    )
+    try {
+      await replaceAllAppData({
+        profile: data.profile,
+        settings: data.settings,
+        clients: data.clients,
+        quotes,
+        invoices,
+        bankAccounts,
+      })
+    } catch (e) {
+      set({ syncError: e instanceof Error ? e.message : 'Failed to import data to Supabase.' })
+      throw e
+    }
   },
 
   resetData: () => set({ ...initialState }),

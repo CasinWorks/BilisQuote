@@ -17,6 +17,109 @@ export type AppData = {
   bankAccounts: BankAccount[]
 }
 
+export async function replaceAllAppData(payload: AppData): Promise<void> {
+  const userId = await requireUserId()
+
+  // Upsert single-row tables first.
+  await upsertProfile(payload.profile)
+  await upsertSettings(payload.settings)
+
+  // Delete in FK-safe order.
+  const [{ error: invDelErr }, { error: quoteDelErr }, { error: bankDelErr }, { error: clientDelErr }] =
+    await Promise.all([
+      supabase.from('invoices').delete().eq('user_id', userId),
+      supabase.from('quotes').delete().eq('user_id', userId),
+      supabase.from('bank_accounts').delete().eq('user_id', userId),
+      supabase.from('clients').delete().eq('user_id', userId),
+    ])
+  if (invDelErr) throw invDelErr
+  if (quoteDelErr) throw quoteDelErr
+  if (bankDelErr) throw bankDelErr
+  if (clientDelErr) throw clientDelErr
+
+  // Insert in FK-safe order.
+  if (payload.clients.length) {
+    const { error } = await supabase.from('clients').insert(
+      payload.clients.map((c) => ({
+        id: c.id,
+        user_id: userId,
+        name: c.name,
+        company: c.company,
+        email: c.email,
+        phone: c.phone,
+        billing_address: c.billingAddress,
+        notes: c.notes,
+        created_at: c.createdAt,
+      })),
+    )
+    if (error) throw error
+  }
+
+  if (payload.quotes.length) {
+    const { error } = await supabase.from('quotes').insert(
+      payload.quotes.map((q) => ({
+        id: q.id,
+        user_id: userId,
+        number: q.number,
+        client_id: q.clientId,
+        issue_date: q.issueDate,
+        valid_until: q.validUntil,
+        validity_days: q.validityDays,
+        scope_lines: q.scopeLines,
+        milestones: q.milestones,
+        contract_total: q.contractTotal,
+        withholding_enabled: q.withholdingEnabled,
+        withholding_percent: q.withholdingPercent,
+        terms_and_conditions: q.termsAndConditions,
+        status: q.status,
+        created_at: q.createdAt,
+        updated_at: q.updatedAt,
+      })),
+    )
+    if (error) throw error
+  }
+
+  if (payload.invoices.length) {
+    const { error } = await supabase.from('invoices').insert(
+      payload.invoices.map((i) => ({
+        id: i.id,
+        user_id: userId,
+        number: i.number,
+        client_id: i.clientId,
+        quote_id: i.quoteId,
+        linked_quote_no: i.linkedQuoteNo ?? null,
+        issue_date: i.issueDate,
+        due_date: i.dueDate,
+        scope_lines: i.scopeLines,
+        milestones: i.milestones,
+        contract_total: i.contractTotal,
+        withholding_enabled: i.withholdingEnabled,
+        withholding_percent: i.withholdingPercent,
+        terms_and_conditions: i.termsAndConditions,
+        status: i.status,
+        created_at: i.createdAt,
+        updated_at: i.updatedAt,
+      })),
+    )
+    if (error) throw error
+  }
+
+  if (payload.bankAccounts.length) {
+    const { error } = await supabase.from('bank_accounts').insert(
+      payload.bankAccounts.map((b) => ({
+        id: b.id,
+        user_id: userId,
+        bank_preset_id: b.bankPresetId,
+        custom_bank_name: b.customBankName,
+        account_name: b.accountName,
+        account_number: b.accountNumber,
+        notes: b.notes,
+      })),
+    )
+    if (error) throw error
+  }
+}
+
 type DbProfileRow = {
   contractor_name: string
   business_name: string

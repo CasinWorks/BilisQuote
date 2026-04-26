@@ -73,7 +73,7 @@ export function Settings() {
     setMigrationErr(null)
     if (!file) return
     const reader = new FileReader()
-    reader.onload = () => {
+    reader.onload = async () => {
       try {
         const text = String(reader.result ?? '')
         const isCsv = file.name.toLowerCase().endsWith('.csv')
@@ -92,8 +92,8 @@ export function Settings() {
           'Replace all data in this browser with the backup? This cannot be undone.',
         )
         if (!ok) return
-        importFullState(parsed.data)
-        setMigrationMsg('Backup restored. Refresh if anything looks out of date.')
+        await importFullState(parsed.data)
+        setMigrationMsg('Backup restored and synced to Supabase.')
       } catch {
         setMigrationErr('Could not read this file. Use a .json or full-backup .csv exported from this app.')
       } finally {
