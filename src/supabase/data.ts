@@ -125,6 +125,13 @@ export const DEFAULT_SETTINGS: AppSettings = {
 }
 
 async function requireUserId(): Promise<string> {
+  // Prefer local session (no network) to avoid transient /auth/v1/user 403s.
+  const { data: sessionData, error: sessionErr } = await supabase.auth.getSession()
+  if (sessionErr) throw sessionErr
+  const sessionUserId = sessionData.session?.user?.id
+  if (sessionUserId) return sessionUserId
+
+  // Fallback to server validation.
   const { data, error } = await supabase.auth.getUser()
   if (error) throw error
   const id = data.user?.id
@@ -233,6 +240,15 @@ export async function fetchAppData(): Promise<AppData> {
       supabase.from('app_settings').select('*').eq('user_id', userId).maybeSingle<DbSettingsRow>(),
     ])
 
+  const tableMissing =
+    (profileErr as { status?: number } | null)?.status === 404 ||
+    (settingsErr as { status?: number } | null)?.status === 404
+  if (tableMissing) {
+    throw new Error(
+      'Supabase tables are missing. Run `supabase/schema.sql` in your Supabase SQL Editor, then refresh.',
+    )
+  }
+
   if (profileErr) throw profileErr
   if (settingsErr) throw settingsErr
 
@@ -266,6 +282,17 @@ export async function fetchAppData(): Promise<AppData> {
       .eq('user_id', userId)
       .returns<DbBankAccountRow[]>(),
   ])
+
+  const any404 =
+    (clientsErr as { status?: number } | null)?.status === 404 ||
+    (quotesErr as { status?: number } | null)?.status === 404 ||
+    (invoicesErr as { status?: number } | null)?.status === 404 ||
+    (bankErr as { status?: number } | null)?.status === 404
+  if (any404) {
+    throw new Error(
+      'Supabase tables are missing. Run `supabase/schema.sql` in your Supabase SQL Editor, then refresh.',
+    )
+  }
 
   if (clientsErr) throw clientsErr
   if (quotesErr) throw quotesErr

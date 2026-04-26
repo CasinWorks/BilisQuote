@@ -29,7 +29,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clearForSignOut()
       return
     }
-    void hydrateFromSupabase()
+    void hydrateFromSupabase().catch(() => {
+      // Store surfaces syncError; avoid unhandled promise rejection noise.
+    })
   }, [user, hydrateFromSupabase, clearForSignOut])
 
   const login = useCallback(async (email: string, password: string) => {
