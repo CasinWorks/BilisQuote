@@ -20,6 +20,10 @@ export type AppData = {
 export async function replaceAllAppData(payload: AppData): Promise<void> {
   const userId = await requireUserId()
 
+  const toDate = (v: string) => (typeof v === 'string' ? v.slice(0, 10) : v)
+  const toNum = (v: unknown) => (typeof v === 'number' ? v : Number(v ?? 0))
+  const toJson = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T
+
   // Upsert single-row tables first.
   await upsertProfile(payload.profile)
   await upsertSettings(payload.settings)
@@ -62,14 +66,14 @@ export async function replaceAllAppData(payload: AppData): Promise<void> {
         user_id: userId,
         number: q.number,
         client_id: q.clientId,
-        issue_date: q.issueDate,
-        valid_until: q.validUntil,
-        validity_days: q.validityDays,
-        scope_lines: q.scopeLines,
-        milestones: q.milestones,
-        contract_total: q.contractTotal,
+        issue_date: toDate(q.issueDate),
+        valid_until: toDate(q.validUntil),
+        validity_days: Math.max(1, Math.trunc(toNum(q.validityDays))),
+        scope_lines: toJson(q.scopeLines),
+        milestones: toJson(q.milestones),
+        contract_total: toNum(q.contractTotal),
         withholding_enabled: q.withholdingEnabled,
-        withholding_percent: q.withholdingPercent,
+        withholding_percent: toNum(q.withholdingPercent),
         terms_and_conditions: q.termsAndConditions,
         status: q.status,
         created_at: q.createdAt,
@@ -88,13 +92,13 @@ export async function replaceAllAppData(payload: AppData): Promise<void> {
         client_id: i.clientId,
         quote_id: i.quoteId,
         linked_quote_no: i.linkedQuoteNo ?? null,
-        issue_date: i.issueDate,
-        due_date: i.dueDate,
-        scope_lines: i.scopeLines,
-        milestones: i.milestones,
-        contract_total: i.contractTotal,
+        issue_date: toDate(i.issueDate),
+        due_date: toDate(i.dueDate),
+        scope_lines: toJson(i.scopeLines),
+        milestones: toJson(i.milestones),
+        contract_total: toNum(i.contractTotal),
         withholding_enabled: i.withholdingEnabled,
-        withholding_percent: i.withholdingPercent,
+        withholding_percent: toNum(i.withholdingPercent),
         terms_and_conditions: i.termsAndConditions,
         status: i.status,
         created_at: i.createdAt,

@@ -1,5 +1,4 @@
 import { create } from 'zustand'
-import type { AppBackupPayload } from '../lib/backup'
 import type {
   AppSettings,
   BankAccount,
@@ -7,7 +6,6 @@ import type {
   Client,
   Invoice,
   Quote,
-  ScopeLineItem,
 } from '../types'
 import {
   DEFAULT_PROFILE,
@@ -17,7 +15,6 @@ import {
   deleteInvoiceRow,
   deleteQuoteRow,
   fetchAppData,
-  replaceAllAppData,
   rpcConsumeNextInvoiceNumber,
   rpcConsumeNextQuoteNumber,
   upsertBankAccountRow,
@@ -32,33 +29,7 @@ function uid(): string {
   return crypto.randomUUID()
 }
 
-function migrateQuoteFromLegacy(q: Record<string, unknown>): Quote {
-  const lines = q.scopeLines as ScopeLineItem[] | undefined
-  const sow = q.scopeOfWork as string | undefined
-  if (lines && Array.isArray(lines) && lines.length > 0) {
-    return q as Quote
-  }
-  return {
-    ...(q as object),
-    scopeLines: sow?.trim()
-      ? [{ id: uid(), description: '', details: sow, amount: null }]
-      : [{ id: uid(), description: '', details: '', amount: null }],
-  } as Quote
-}
-
-function migrateInvoiceFromLegacy(inv: Record<string, unknown>): Invoice {
-  const lines = inv.scopeLines as ScopeLineItem[] | undefined
-  const sow = inv.scopeOfWork as string | undefined
-  if (lines && Array.isArray(lines) && lines.length > 0) {
-    return inv as Invoice
-  }
-  return {
-    ...(inv as object),
-    scopeLines: sow?.trim()
-      ? [{ id: uid(), description: '', details: sow, amount: null }]
-      : [{ id: uid(), description: '', details: '', amount: null }],
-  } as Invoice
-}
+// Legacy migration helpers removed with backup/import feature.
 
 type State = {
   profile: BusinessProfile
@@ -91,8 +62,6 @@ type Actions = {
   addBankAccount: (b: Omit<BankAccount, 'id'>) => BankAccount
   updateBankAccount: (id: string, b: Partial<BankAccount>) => void
   deleteBankAccount: (id: string) => void
-  /** Replace all persisted app data (used after importing a backup file). */
-  importFullState: (data: AppBackupPayload) => Promise<void>
   resetData: () => void
 }
 
@@ -329,39 +298,6 @@ export const useAppStore = create<State & Actions>()((set, get) => ({
     void deleteBankAccountRow(id).catch((e) =>
       set({ syncError: e instanceof Error ? e.message : 'Failed to delete bank account.' }),
     )
-  },
-
-  importFullState: async (data) => {
-    // Keep legacy migrations for older backup payloads.
-    const quotes = (data.quotes ?? []).map((q) =>
-      migrateQuoteFromLegacy(q as unknown as Record<string, unknown>),
-    )
-    const invoices = (data.invoices ?? []).map((inv) =>
-      migrateInvoiceFromLegacy(inv as unknown as Record<string, unknown>),
-    )
-    const bankAccounts = data.bankAccounts ?? []
-    set({
-      profile: data.profile,
-      settings: data.settings,
-      clients: data.clients,
-      quotes,
-      invoices,
-      bankAccounts,
-    })
-
-    try {
-      await replaceAllAppData({
-        profile: data.profile,
-        settings: data.settings,
-        clients: data.clients,
-        quotes,
-        invoices,
-        bankAccounts,
-      })
-    } catch (e) {
-      set({ syncError: e instanceof Error ? e.message : 'Failed to import data to Supabase.' })
-      throw e
-    }
   },
 
   resetData: () => set({ ...initialState }),
