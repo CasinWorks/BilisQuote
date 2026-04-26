@@ -1,5 +1,4 @@
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
 import type { AppBackupPayload } from '../lib/backup'
 import type {
   AppSettings,
@@ -10,14 +9,23 @@ import type {
   Quote,
   ScopeLineItem,
 } from '../types'
-
-const DEFAULT_TERMS = `1. This quotation is valid for the period stated on the cover page unless withdrawn earlier in writing.
-2. Acceptance of this quotation constitutes agreement to the scope of work, milestones, and pricing described herein.
-3. Payment is due according to the payment schedule. Late payments may incur reasonable reminders; work may be paused until accounts are current where agreed in writing.
-4. Changes to scope may require a revised quotation or written change order.
-5. Either party may terminate for material breach subject to notice and cure where applicable, as further agreed in the engagement letter or contract.`
-
-const DEFAULT_SCOPE = `Describe the deliverables, boundaries, and assumptions for this engagement.`
+import {
+  DEFAULT_PROFILE,
+  DEFAULT_SETTINGS,
+  deleteBankAccountRow,
+  deleteClientRow,
+  deleteInvoiceRow,
+  deleteQuoteRow,
+  fetchAppData,
+  rpcConsumeNextInvoiceNumber,
+  rpcConsumeNextQuoteNumber,
+  upsertBankAccountRow,
+  upsertClient,
+  upsertInvoice,
+  upsertProfile,
+  upsertQuote,
+  upsertSettings,
+} from '../supabase/data'
 
 function uid(): string {
   return crypto.randomUUID()
@@ -58,9 +66,14 @@ type State = {
   quotes: Quote[]
   invoices: Invoice[]
   bankAccounts: BankAccount[]
+  hydrating: boolean
+  hydrated: boolean
+  syncError: string | null
 }
 
 type Actions = {
+  hydrateFromSupabase: () => Promise<void>
+  clearForSignOut: () => void
   setProfile: (p: Partial<BusinessProfile>) => void
   setSettings: (s: Partial<AppSettings>) => void
   addClient: (c: Omit<Client, 'id' | 'createdAt'>) => Client
@@ -82,188 +95,272 @@ type Actions = {
   resetData: () => void
 }
 
-const initialProfile: BusinessProfile = {
-  contractorName: 'Your Name',
-  businessName: '',
-  email: '',
-  phone: '',
-  address: '',
-  showTin: false,
-  tin: '',
-}
-
-const initialSettings: AppSettings = {
-  quotePrefix: 'Q',
-  nextQuoteNumber: 1,
-  invoicePrefix: 'INV',
-  nextInvoiceNumber: 1,
-  defaultValidityDays: 30,
-  defaultInvoiceDueDays: 30,
-  defaultTerms: DEFAULT_TERMS,
-  defaultScope: DEFAULT_SCOPE,
-}
-
 const initialState: State = {
-  profile: initialProfile,
-  settings: initialSettings,
+  profile: DEFAULT_PROFILE,
+  settings: DEFAULT_SETTINGS,
   clients: [],
   quotes: [],
   invoices: [],
   bankAccounts: [],
+  hydrating: false,
+  hydrated: false,
+  syncError: null,
 }
 
-export const useAppStore = create<State & Actions>()(
-  persist(
-    (set, get) => ({
-      ...initialState,
+export const useAppStore = create<State & Actions>()((set, get) => ({
+  ...initialState,
 
-      setProfile: (p) =>
-        set((s) => ({ profile: { ...s.profile, ...p } })),
+  hydrateFromSupabase: async () => {
+    set({ hydrating: true, syncError: null })
+    try {
+      const data = await fetchAppData()
+      set({
+        profile: data.profile,
+        settings: data.settings,
+        clients: data.clients,
+        quotes: data.quotes,
+        invoices: data.invoices,
+        bankAccounts: data.bankAccounts,
+        hydrated: true,
+      })
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to load data from Supabase.'
+      set({ syncError: msg })
+      throw e
+    } finally {
+      set({ hydrating: false })
+    }
+  },
 
-      setSettings: (st) =>
-        set((s) => ({ settings: { ...s.settings, ...st } })),
+  clearForSignOut: () => set({ ...initialState }),
 
-      addClient: (c) => {
-        const client: Client = {
-          ...c,
-          id: uid(),
-          createdAt: new Date().toISOString(),
-        }
-        set((s) => ({ clients: [client, ...s.clients] }))
-        return client
-      },
+  setProfile: (p) => {
+    set((s) => ({ profile: { ...s.profile, ...p } }))
+    void upsertProfile(get().profile).catch((e) =>
+      set({ syncError: e instanceof Error ? e.message : 'Failed to save profile.' }),
+    )
+  },
 
-      updateClient: (id, c) =>
-        set((s) => ({
-          clients: s.clients.map((x) => (x.id === id ? { ...x, ...c } : x)),
-        })),
+  setSettings: (st) => {
+    set((s) => ({ settings: { ...s.settings, ...st } }))
+    void upsertSettings(get().settings).catch((e) =>
+      set({ syncError: e instanceof Error ? e.message : 'Failed to save settings.' }),
+    )
+  },
 
-      deleteClient: (id) =>
-        set((s) => ({
-          clients: s.clients.filter((x) => x.id !== id),
-        })),
+  addClient: (c) => {
+    const client: Client = {
+      ...c,
+      id: uid(),
+      createdAt: new Date().toISOString(),
+    }
+    set((s) => ({ clients: [client, ...s.clients] }))
+    void upsertClient(client).catch((e) =>
+      set({ syncError: e instanceof Error ? e.message : 'Failed to save client.' }),
+    )
+    return client
+  },
 
-      consumeNextQuoteNumber: () => {
-        const { quotePrefix, nextQuoteNumber } = get().settings
-        const num = nextQuoteNumber
-        const str = `${quotePrefix}-${String(num).padStart(4, '0')}`
-        set((s) => ({
-          settings: { ...s.settings, nextQuoteNumber: num + 1 },
-        }))
-        return str
-      },
+  updateClient: (id, c) => {
+    set((s) => ({
+      clients: s.clients.map((x) => (x.id === id ? { ...x, ...c } : x)),
+    }))
+    const row = get().clients.find((x) => x.id === id)
+    if (row) {
+      void upsertClient(row).catch((e) =>
+        set({ syncError: e instanceof Error ? e.message : 'Failed to save client.' }),
+      )
+    }
+  },
 
-      consumeNextInvoiceNumber: () => {
-        const { invoicePrefix, nextInvoiceNumber } = get().settings
-        const num = nextInvoiceNumber
-        const str = `${invoicePrefix}-${String(num).padStart(4, '0')}`
-        set((s) => ({
-          settings: { ...s.settings, nextInvoiceNumber: num + 1 },
-        }))
-        return str
-      },
+  deleteClient: (id) => {
+    set((s) => ({
+      clients: s.clients.filter((x) => x.id !== id),
+      quotes: s.quotes.filter((q) => q.clientId !== id),
+      invoices: s.invoices.filter((inv) => inv.clientId !== id),
+    }))
+    void deleteClientRow(id).catch((e) =>
+      set({ syncError: e instanceof Error ? e.message : 'Failed to delete client.' }),
+    )
+  },
 
-      addQuote: (q) => {
-        const number = get().consumeNextQuoteNumber()
-        const now = new Date().toISOString()
-        const quote: Quote = {
-          ...q,
-          id: uid(),
-          number,
-          createdAt: now,
-          updatedAt: now,
-        }
-        set((s) => ({ quotes: [quote, ...s.quotes] }))
-        return quote
-      },
+  consumeNextQuoteNumber: () => {
+    const { quotePrefix, nextQuoteNumber } = get().settings
+    const num = nextQuoteNumber
+    const str = `${quotePrefix}-${String(num).padStart(4, '0')}`
+    set((s) => ({
+      settings: { ...s.settings, nextQuoteNumber: num + 1 },
+    }))
+    void upsertSettings(get().settings).catch(() => {})
+    return str
+  },
 
-      updateQuote: (id, patch) =>
-        set((s) => ({
-          quotes: s.quotes.map((x) =>
-            x.id === id
-              ? { ...x, ...patch, updatedAt: new Date().toISOString() }
-              : x,
-          ),
-        })),
+  consumeNextInvoiceNumber: () => {
+    const { invoicePrefix, nextInvoiceNumber } = get().settings
+    const num = nextInvoiceNumber
+    const str = `${invoicePrefix}-${String(num).padStart(4, '0')}`
+    set((s) => ({
+      settings: { ...s.settings, nextInvoiceNumber: num + 1 },
+    }))
+    void upsertSettings(get().settings).catch(() => {})
+    return str
+  },
 
-      deleteQuote: (id) =>
-        set((s) => ({ quotes: s.quotes.filter((x) => x.id !== id) })),
+  addQuote: (q) => {
+    const now = new Date().toISOString()
+    const quote: Quote = {
+      ...q,
+      id: uid(),
+      number: 'PENDING',
+      createdAt: now,
+      updatedAt: now,
+    }
 
-      addInvoice: (inv) => {
-        const number = get().consumeNextInvoiceNumber()
-        const now = new Date().toISOString()
-        const invoice: Invoice = {
-          ...inv,
-          id: uid(),
-          number,
-          createdAt: now,
-          updatedAt: now,
-        }
-        set((s) => ({ invoices: [invoice, ...s.invoices] }))
-        return invoice
-      },
+    set((s) => ({ quotes: [quote, ...s.quotes] }))
 
-      updateInvoice: (id, patch) =>
-        set((s) => ({
-          invoices: s.invoices.map((x) =>
-            x.id === id
-              ? { ...x, ...patch, updatedAt: new Date().toISOString() }
-              : x,
-          ),
-        })),
+    void (async () => {
+      const n = (await rpcConsumeNextQuoteNumber()) ?? get().consumeNextQuoteNumber()
+      const patched: Quote = { ...quote, number: n }
+      set((s) => ({
+        quotes: s.quotes.map((x) => (x.id === quote.id ? patched : x)),
+      }))
+      await upsertQuote(patched)
+    })().catch((e) =>
+      set({ syncError: e instanceof Error ? e.message : 'Failed to save quotation.' }),
+    )
 
-      deleteInvoice: (id) =>
-        set((s) => ({ invoices: s.invoices.filter((x) => x.id !== id) })),
+    return quote
+  },
 
-      addBankAccount: (b) => {
-        const row: BankAccount = { ...b, id: uid() }
-        set((s) => ({ bankAccounts: [row, ...s.bankAccounts] }))
-        return row
-      },
+  updateQuote: (id, patch) => {
+    set((s) => ({
+      quotes: s.quotes.map((x) =>
+        x.id === id ? { ...x, ...patch, updatedAt: new Date().toISOString() } : x,
+      ),
+    }))
+    const row = get().quotes.find((x) => x.id === id)
+    if (row) {
+      void upsertQuote(row).catch((e) =>
+        set({ syncError: e instanceof Error ? e.message : 'Failed to save quotation.' }),
+      )
+    }
+  },
 
-      updateBankAccount: (id, patch) =>
-        set((s) => ({
-          bankAccounts: s.bankAccounts.map((x) =>
-            x.id === id ? { ...x, ...patch } : x,
-          ),
-        })),
+  deleteQuote: (id) => {
+    set((s) => ({ quotes: s.quotes.filter((x) => x.id !== id) }))
+    void deleteQuoteRow(id).catch((e) =>
+      set({ syncError: e instanceof Error ? e.message : 'Failed to delete quotation.' }),
+    )
+  },
 
-      deleteBankAccount: (id) =>
-        set((s) => ({
-          bankAccounts: s.bankAccounts.filter((x) => x.id !== id),
-        })),
+  addInvoice: (inv) => {
+    const now = new Date().toISOString()
+    const row: Invoice = {
+      ...inv,
+      id: uid(),
+      number: 'PENDING',
+      createdAt: now,
+      updatedAt: now,
+    }
 
-      importFullState: (data) =>
-        set({
-          profile: data.profile,
-          settings: data.settings,
-          clients: data.clients,
-          quotes: data.quotes,
-          invoices: data.invoices,
-          bankAccounts: data.bankAccounts ?? [],
-        }),
+    set((s) => ({ invoices: [row, ...s.invoices] }))
 
-      resetData: () => set({ ...initialState }),
-    }),
-    {
-      name: 'quotation-invoice-app-v1',
-      version: 3,
-      migrate: (persistedState, version) => {
-        if (!persistedState || typeof persistedState !== 'object') return persistedState
-        const s = persistedState as State
-        if (version < 2) {
-          s.quotes = (s.quotes ?? []).map((q) =>
-            migrateQuoteFromLegacy(q as Record<string, unknown>),
-          )
-          s.invoices = (s.invoices ?? []).map((inv) =>
-            migrateInvoiceFromLegacy(inv as Record<string, unknown>),
-          )
-        }
-        if (version < 3) {
-          if (!Array.isArray(s.bankAccounts)) s.bankAccounts = []
-        }
-        return s
-      },
-    },
-  ),
-)
+    void (async () => {
+      const n = (await rpcConsumeNextInvoiceNumber()) ?? get().consumeNextInvoiceNumber()
+      const patched: Invoice = { ...row, number: n }
+      set((s) => ({
+        invoices: s.invoices.map((x) => (x.id === row.id ? patched : x)),
+      }))
+      await upsertInvoice(patched)
+    })().catch((e) =>
+      set({ syncError: e instanceof Error ? e.message : 'Failed to save invoice.' }),
+    )
+
+    return row
+  },
+
+  updateInvoice: (id, patch) => {
+    set((s) => ({
+      invoices: s.invoices.map((x) =>
+        x.id === id ? { ...x, ...patch, updatedAt: new Date().toISOString() } : x,
+      ),
+    }))
+    const row = get().invoices.find((x) => x.id === id)
+    if (row) {
+      void upsertInvoice(row).catch((e) =>
+        set({ syncError: e instanceof Error ? e.message : 'Failed to save invoice.' }),
+      )
+    }
+  },
+
+  deleteInvoice: (id) => {
+    set((s) => ({ invoices: s.invoices.filter((x) => x.id !== id) }))
+    void deleteInvoiceRow(id).catch((e) =>
+      set({ syncError: e instanceof Error ? e.message : 'Failed to delete invoice.' }),
+    )
+  },
+
+  addBankAccount: (b) => {
+    const row: BankAccount = { ...b, id: uid() }
+    set((s) => ({ bankAccounts: [row, ...s.bankAccounts] }))
+    void upsertBankAccountRow(row).catch((e) =>
+      set({ syncError: e instanceof Error ? e.message : 'Failed to save bank account.' }),
+    )
+    return row
+  },
+
+  updateBankAccount: (id, patch) => {
+    set((s) => ({
+      bankAccounts: s.bankAccounts.map((x) => (x.id === id ? { ...x, ...patch } : x)),
+    }))
+    const row = get().bankAccounts.find((x) => x.id === id)
+    if (row) {
+      void upsertBankAccountRow(row).catch((e) =>
+        set({ syncError: e instanceof Error ? e.message : 'Failed to save bank account.' }),
+      )
+    }
+  },
+
+  deleteBankAccount: (id) => {
+    set((s) => ({
+      bankAccounts: s.bankAccounts.filter((x) => x.id !== id),
+    }))
+    void deleteBankAccountRow(id).catch((e) =>
+      set({ syncError: e instanceof Error ? e.message : 'Failed to delete bank account.' }),
+    )
+  },
+
+  importFullState: (data) => {
+    // Keep legacy migrations for older backup payloads.
+    const quotes = (data.quotes ?? []).map((q) =>
+      migrateQuoteFromLegacy(q as unknown as Record<string, unknown>),
+    )
+    const invoices = (data.invoices ?? []).map((inv) =>
+      migrateInvoiceFromLegacy(inv as unknown as Record<string, unknown>),
+    )
+    const bankAccounts = data.bankAccounts ?? []
+    set({
+      profile: data.profile,
+      settings: data.settings,
+      clients: data.clients,
+      quotes,
+      invoices,
+      bankAccounts,
+    })
+
+    void (async () => {
+      await upsertProfile(data.profile)
+      await upsertSettings(data.settings)
+      await Promise.all([
+        ...data.clients.map((c) => upsertClient(c)),
+        ...quotes.map((q) => upsertQuote(q)),
+        ...invoices.map((i) => upsertInvoice(i)),
+        ...bankAccounts.map((b) => upsertBankAccountRow(b)),
+      ])
+    })().catch((e) =>
+      set({ syncError: e instanceof Error ? e.message : 'Failed to import data to Supabase.' }),
+    )
+  },
+
+  resetData: () => set({ ...initialState }),
+}))

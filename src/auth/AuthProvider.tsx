@@ -2,9 +2,12 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import type { User } from '@supabase/supabase-js'
 import { supabase } from '../supabase/client'
 import { AuthContext } from './context'
+import { useAppStore } from '../store/useAppStore'
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
+  const hydrateFromSupabase = useAppStore((s) => s.hydrateFromSupabase)
+  const clearForSignOut = useAppStore((s) => s.clearForSignOut)
 
   useEffect(() => {
     let mounted = true
@@ -21,6 +24,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  useEffect(() => {
+    if (!user) {
+      clearForSignOut()
+      return
+    }
+    void hydrateFromSupabase()
+  }, [user, hydrateFromSupabase, clearForSignOut])
+
   const login = useCallback(async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({
       email: email.trim(),
@@ -31,12 +42,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const register = useCallback(async (email: string, password: string) => {
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email: email.trim(),
       password,
     })
     if (error) return { ok: false as const, error: error.message }
-    return { ok: true as const }
+    // If email confirmations are enabled, Supabase returns no session here.
+    const needsEmailConfirmation = !data.session
+    return { ok: true as const, needsEmailConfirmation }
   }, [])
 
   const loginWithGoogle = useCallback(async () => {

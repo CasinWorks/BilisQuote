@@ -10,6 +10,7 @@ export function Register() {
   const [p, setP] = useState('')
   const [confirm, setConfirm] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [info, setInfo] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
   if (user) {
@@ -19,6 +20,7 @@ export function Register() {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
+    setInfo(null)
     if (p !== confirm) {
       setError('Passwords do not match.')
       return
@@ -27,7 +29,14 @@ export function Register() {
     try {
       const res = await register(u, p)
       if (res.ok) {
-        navigate('/', { replace: true })
+        if (res.needsEmailConfirmation) {
+          setInfo(
+            'Account created. Please check your email and confirm your address, then return here to log in.',
+          )
+          navigate('/login', { replace: true })
+        } else {
+          navigate('/', { replace: true })
+        }
       } else {
         setError(res.error || 'Registration failed.')
       }
@@ -81,6 +90,7 @@ export function Register() {
             />
           </label>
           {error ? <p className="text-sm text-red-600">{error}</p> : null}
+          {info ? <p className="text-sm text-emerald-700">{info}</p> : null}
           <button
             type="submit"
             disabled={busy}

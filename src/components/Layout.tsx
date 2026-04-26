@@ -1,5 +1,6 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/useAuth'
+import { useAppStore } from '../store/useAppStore'
 
 const linkClass = ({ isActive }: { isActive: boolean }) =>
   [
@@ -12,6 +13,8 @@ const linkClass = ({ isActive }: { isActive: boolean }) =>
 export function Layout() {
   const { email, logout } = useAuth()
   const navigate = useNavigate()
+  const hydrating = useAppStore((s) => s.hydrating)
+  const syncError = useAppStore((s) => s.syncError)
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -62,6 +65,16 @@ export function Layout() {
         </div>
       </header>
       <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 py-8">
+        {syncError ? (
+          <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {syncError}
+          </div>
+        ) : null}
+        {hydrating ? (
+          <div className="mb-4 rounded-lg border border-ink-200 bg-white px-4 py-3 text-sm text-ink-700">
+            Loading your data from Supabase…
+          </div>
+        ) : null}
         <Outlet />
       </main>
     </div>
