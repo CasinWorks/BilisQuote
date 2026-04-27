@@ -3,7 +3,7 @@ import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/useAuth'
 
 export function Login() {
-  const { user, login, loginWithGoogle } = useAuth()
+  const { user, login } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
   const rawFrom = (location.state as { from?: string } | null)?.from
@@ -40,7 +40,7 @@ export function Login() {
         <p className="text-xs font-semibold uppercase tracking-wide text-accent">Sign in</p>
         <h1 className="mt-2 font-display text-2xl font-semibold text-ink-950">Welcome back</h1>
         <p className="mt-2 text-sm text-ink-600">
-          Sign in with your Supabase account (email/password) or continue with Google (if enabled).
+          Sign in with your Supabase account (email/password).
         </p>
 
         <form onSubmit={submit} className="mt-6 space-y-4">
@@ -75,26 +75,6 @@ export function Login() {
             {busy ? 'Signing in…' : 'Log in'}
           </button>
         </form>
-
-        <div className="mt-3">
-          <button
-            type="button"
-            onClick={async () => {
-              setError(null)
-              setBusy(true)
-              try {
-                const res = await loginWithGoogle()
-                if (!res.ok) setError(res.error || 'Google sign-in failed.')
-              } finally {
-                setBusy(false)
-              }
-            }}
-            disabled={busy}
-            className="w-full rounded-lg border border-ink-200 bg-white py-2.5 text-sm font-medium text-ink-800 hover:bg-ink-50"
-          >
-            Continue with Google
-          </button>
-        </div>
 
         <p className="mt-6 text-center text-sm text-ink-600">
           No account?{' '}
